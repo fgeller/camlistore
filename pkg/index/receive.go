@@ -390,6 +390,7 @@ func (ix *Index) populateFile(fetcher blob.Fetcher, b *schema.Blob, mm *mutation
 	wholeRef := blob.RefFromHash(sha1)
 
 	if imageBuf != nil {
+		needFull := false
 		conf, err := images.DecodeConfig(bytes.NewReader(imageBuf.Bytes))
 		// If our optimistic 512KB in-memory prefix from above was too short to get the dimensions, pass the whole thing instead and try again.
 		if err == io.ErrUnexpectedEOF {
@@ -398,16 +399,31 @@ func (ix *Index) populateFile(fetcher blob.Fetcher, b *schema.Blob, mm *mutation
 			if err == nil {
 				conf, err = images.DecodeConfig(fr)
 				fr.Close()
+				needFull = err == nil
 			}
 		}
 		if err == nil {
 			mm.Set(keyImageSize.Key(blobRef), keyImageSize.Val(fmt.Sprint(conf.Width), fmt.Sprint(conf.Height)))
 		}
-		if ft, err := schema.FileTime(bytes.NewReader(imageBuf.Bytes)); err == nil {
-			log.Printf("filename %q exif = %v, %v", b.FileName(), ft, err)
-			times = append(times, ft)
+
+		if needFull {
+			var fr *schema.FileReader
+			fr, err = b.NewFileReader(fetcher)
+			if err == nil {
+				ft, err := schema.FileTime(fr)
+				if err == nil {
+					times = append(times, ft)
+				}
+				log.Printf("filename %q exif = %v, %v", b.FileName(), ft, err)
+				fr.Close()
+			}
 		} else {
-			log.Printf("filename %q exif = %v, %v", b.FileName(), ft, err)
+			if ft, err := schema.FileTime(bytes.NewReader(imageBuf.Bytes)); err == nil {
+				times = append(times, ft)
+				log.Printf("filename %q exif = %v, %v", b.FileName(), ft, err)
+			} else {
+				log.Printf("filename %q exif = %v, %v", b.FileName(), ft, err)
+			}
 		}
 
 		// TODO(mpl): find (generate?) more broken EXIF images to experiment with.
